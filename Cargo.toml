@@ -1,0 +1,38 @@
+[package]
+name = "rocket"
+version = "0.1.0"
+authors = ["Craig Niles <niles.c@gmail.com>"]
+edition = "2021"
+resolver = "2"
+rust-version = "1.71"
+
+[[bin]]
+name = "rocket"
+harness = false # do not use the built in cargo test harness -> resolve rust-analyzer errors
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true    # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+[features]
+default = ["std", "embassy", "esp-idf-svc/native"]
+
+pio = ["esp-idf-svc/pio"]
+std = ["alloc", "esp-idf-svc/binstart", "esp-idf-svc/std"]
+alloc = ["esp-idf-svc/alloc"]
+nightly = ["esp-idf-svc/nightly"]
+experimental = ["esp-idf-svc/experimental"]
+embassy = ["esp-idf-svc/embassy-sync", "esp-idf-svc/critical-section", "esp-idf-svc/embassy-time-driver"]
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+esp-idf-svc = { version = "0.48", default-features = false }
+esp-idf-hal = "0.43.1"
+embedded-hal = "1.0.0"
+bmp390 = { version = "0.1.0", path = "../bmp390" }
+
+[build-dependencies]
+embuild = "0.31.3"
