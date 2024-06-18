@@ -1,5 +1,5 @@
 use std::{
-    borrow::Borrow,
+    str::FromStr,
     sync::{
         mpsc::{self, Receiver, Sender},
         Arc, Mutex,
@@ -18,7 +18,10 @@ use esp_idf_svc::{
     espnow::PeerInfo,
     eventloop::EspSystemEventLoop,
     nvs::EspDefaultNvsPartition,
-    wifi::{BlockingWifi, EspWifi, WifiDeviceId},
+    wifi::{
+        AccessPointConfiguration, AuthMethod, BlockingWifi, ClientConfiguration, Configuration,
+        EspWifi, WifiDeviceId,
+    },
 };
 
 fn read_input(uart_driver: &Arc<Mutex<UartDriver>>) -> String {
@@ -103,17 +106,28 @@ fn wifi_thread(
 ) {
     let sys_loop = EspSystemEventLoop::take().unwrap();
     let nvs = EspDefaultNvsPartition::take().unwrap();
+    let esp_wifi = EspWifi::new(modem, sys_loop.clone(), Some(nvs)).unwrap();
 
-    let mut wifi = BlockingWifi::wrap(
-        EspWifi::new(modem, sys_loop.clone(), Some(nvs)).unwrap(),
-        sys_loop,
-    )
+    let mut wifi = BlockingWifi::wrap(esp_wifi, sys_loop).unwrap();
+
+    let (mut client_config, mut ap_config) = (
+        ClientConfiguration::default(),
+        AccessPointConfiguration::default(),
+    );
+
+    client_config.channel = Some(1);
+
+    ap_config.ssid = heapless::String::<32>::from_str("omega9").unwrap();
+    ap_config.password = heapless::String::<64>::from_str("knock it off").unwrap();
+    ap_config.channel = 1;
+    ap_config.auth_method = AuthMethod::WPA3Personal;
+    ap_config.ssid_hidden = false;
+
+    wifi.set_configuration(&Configuration::Mixed(
+        client_config.clone(),
+        ap_config.clone(),
+    ))
     .unwrap();
-
-    wifi.get_configuration()
-        .unwrap()
-        .as_client_conf_mut()
-        .channel = Some(1);
 
     wifi.start().unwrap();
 

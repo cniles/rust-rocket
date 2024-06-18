@@ -34,6 +34,7 @@ esp-idf-hal = "0.43.1"
 embedded-hal = "1.0.0"
 bmp390 = { version = "0.1.0", path = "../bmp390" }
 num_cpus = "1.16.0"
+heapless = "0.8.0"
 
 [build-dependencies]
 embuild = "0.31.3"

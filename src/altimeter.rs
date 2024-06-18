@@ -1,14 +1,13 @@
 use std::{
-    fmt::Display,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use bmp390::{
     self,
-    bmp390::{DeviceAddr, Osr, OsrPress, OsrTemp, PwrCtrl, Register},
+    bmp390::{Bmp390Error, DeviceAddr, Osr, OsrPress, OsrTemp, PwrCtrl, Register},
 };
-use esp_idf_hal::i2c::I2cDriver;
+use embedded_hal::i2c::I2c;
 
 #[derive(Copy, Clone, Debug)]
 pub struct AltimeterStats {
@@ -39,22 +38,31 @@ impl Default for AltimeterStats {
     }
 }
 
-pub struct Altimeter<'d> {
-    sensor: bmp390::BMP390<I2cDriver<'d>>,
+pub struct Altimeter<I2C> {
+    sensor: bmp390::BMP390<I2C>,
     pub stats: Arc<Mutex<AltimeterStats>>,
     sea_level_pressure: f64,
 }
 
-impl<'d> Altimeter<'d> {
-    pub fn new(i2c_driver: Arc<Mutex<I2cDriver<'d>>>) -> Altimeter {
-        let sensor = bmp390::BMP390::new(i2c_driver, DeviceAddr::AD0).unwrap();
+#[derive(Copy, Clone, Debug)]
+pub enum AltimeterError<I2C> {
+    SensorError(Bmp390Error<I2C>),
+}
+
+impl<I2C> Altimeter<I2C>
+where
+    I2C: I2c,
+{
+    pub fn new(i2c_driver: Arc<Mutex<I2C>>) -> Result<Altimeter<I2C>, AltimeterError<I2C::Error>> {
+        let sensor = bmp390::BMP390::new(i2c_driver, DeviceAddr::AD0)
+            .map_err(AltimeterError::SensorError)?;
         let stats = Arc::new(Mutex::new(AltimeterStats::default()));
 
-        Altimeter {
+        Ok(Altimeter {
             sensor,
             stats,
-            sea_level_pressure: 101320.75,
-        }
+            sea_level_pressure: 101120.0,
+        })
     }
 
     pub fn sea_level_pressure(&mut self, sea_level_pressure: f64) {
@@ -62,17 +70,17 @@ impl<'d> Altimeter<'d> {
     }
 
     pub fn reset_stats(&mut self) {
-        let mut stats = self.stats.lock().unwrap();
+        let mut stats = self.stats.lock().expect("mutex is never closed");
         *stats = AltimeterStats::default();
     }
 
-    pub fn update_stats(&mut self) {
+    pub fn update_stats(&mut self) -> Result<(), AltimeterError<I2C::Error>> {
         self.sensor
             .write_register(
                 Register::Osr,
                 Osr::Select(OsrTemp::x32, OsrPress::x2).value(),
             )
-            .unwrap();
+            .map_err(AltimeterError::SensorError)?;
 
         self.sensor
             .write_register(
@@ -83,34 +91,37 @@ impl<'d> Altimeter<'d> {
                 }
                 .value(),
             )
-            .unwrap();
+            .map_err(AltimeterError::SensorError)?;
 
         std::thread::sleep(Duration::from_millis(100));
-        let temperature = self.sensor.read_temperature();
 
-        if let Ok(temperature) = temperature {
-            if let Ok(pressure) = self.sensor.read_pressure(temperature) {
-                let mut stats = self.stats.lock().unwrap();
-                let altitude = calc_altitude(pressure, self.sea_level_pressure);
+        let temperature = self
+            .sensor
+            .read_temperature()
+            .map_err(AltimeterError::SensorError)?;
 
-                stats.altitude = altitude;
-                stats.temperature = temperature;
-                stats.pressure = pressure;
+        let pressure = self
+            .sensor
+            .read_pressure(temperature)
+            .map_err(AltimeterError::SensorError)?;
 
-                stats.maximum_temperature = stats.maximum_temperature.max(temperature);
-                stats.minimum_temperature = stats.minimum_temperature.min(temperature);
+        let mut stats = self.stats.lock().unwrap();
+        let altitude = calc_altitude(pressure, self.sea_level_pressure);
 
-                stats.minimum_altitude = stats.minimum_altitude.min(altitude);
-                stats.maximum_altitude = stats.maximum_altitude.max(altitude);
+        stats.altitude = altitude;
+        stats.temperature = temperature;
+        stats.pressure = pressure;
 
-                stats.maximum_pressure = stats.maximum_pressure.max(pressure);
-                stats.minimum_pressure = stats.minimum_pressure.min(pressure);
-            } else {
-                println!("couldn't read sensor")
-            }
-        } else {
-            println!("couldn't read sensor");
-        }
+        stats.maximum_temperature = stats.maximum_temperature.max(temperature);
+        stats.minimum_temperature = stats.minimum_temperature.min(temperature);
+
+        stats.minimum_altitude = stats.minimum_altitude.min(altitude);
+        stats.maximum_altitude = stats.maximum_altitude.max(altitude);
+
+        stats.maximum_pressure = stats.maximum_pressure.max(pressure);
+        stats.minimum_pressure = stats.minimum_pressure.min(pressure);
+
+        Ok(())
     }
 }
 
