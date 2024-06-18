@@ -1,19 +1,24 @@
+use std::rc::Rc;
+
 use embedded_hal::digital::InputPin;
 use esp_idf_hal::{
-    adc::{Adc, AdcChannelDriver, AdcConfig, AdcDriver},
+    adc::{
+        config::Resolution,
+        oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
+        AdcConfig,
+    },
     gpio::ADCPin,
     peripheral::Peripheral,
     sys::EspError,
 };
 
-pub struct Battery<C, ADC, V>
+pub struct Battery<C, T>
 where
-    ADC: Adc + 'static,
-    V: ADCPin,
+    T: ADCPin,
 {
     charge_pin: C,
-    adc_driver: AdcDriver<'static, ADC>,
-    adc_channel_driver: AdcChannelDriver<'static, 3, V>,
+    adc_driver: Rc<AdcDriver<'static, T::Adc>>,
+    adc_channel_driver: AdcChannelDriver<'static, T, Rc<AdcDriver<'static, T::Adc>>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -22,16 +27,24 @@ pub enum BatteryError<C, V> {
     VoltageError(V),
 }
 
-impl<C, ADC, V> Battery<C, ADC, V>
+impl<C, T> Battery<C, T>
 where
     C: InputPin,
-    ADC: Adc + 'static,
-    V: ADCPin<Adc = ADC>,
+    T: ADCPin,
 {
-    pub fn new(charge_pin: C, adc: impl Peripheral<P = ADC> + 'static, adc_pin: V) -> Self {
-        let config = AdcConfig::new().calibration(true);
-        let adc_driver = AdcDriver::new(adc, &config).unwrap();
-        let adc_channel_driver = AdcChannelDriver::new(adc_pin).unwrap();
+    pub fn new(charge_pin: C, adc: impl Peripheral<P = T::Adc> + 'static, adc_pin: T) -> Self {
+        let config = AdcConfig::new()
+            .calibration(true)
+            .resolution(esp_idf_hal::adc::config::Resolution::Resolution12Bit);
+        let mut channel_config = AdcChannelConfig::default();
+        channel_config.resolution = Resolution::Resolution12Bit;
+        channel_config.attenuation = esp_idf_hal::adc::attenuation::DB_11;
+
+        let adc_driver = Rc::new(AdcDriver::new(adc).unwrap());
+
+        let adc_channel_driver =
+            AdcChannelDriver::new(adc_driver.clone(), adc_pin, &channel_config).unwrap();
+
         Self {
             charge_pin,
             adc_driver,
