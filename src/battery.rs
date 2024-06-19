@@ -1,78 +1,82 @@
-use std::rc::Rc;
-
-use embedded_hal::digital::InputPin;
 use esp_idf_hal::{
     adc::{
         config::Resolution,
         oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
-        AdcConfig,
     },
-    gpio::ADCPin,
+    gpio::{ADCPin, Input, InputPin, Pin, PinDriver},
     peripheral::Peripheral,
     sys::EspError,
 };
 
 pub struct Battery<C, T>
 where
+    C: Pin + InputPin,
     T: ADCPin,
 {
-    charge_pin: C,
-    adc_driver: Rc<AdcDriver<'static, T::Adc>>,
-    adc_channel_driver: AdcChannelDriver<'static, T, Rc<AdcDriver<'static, T::Adc>>>,
+    charge_pin: PinDriver<'static, C, Input>,
+    adc_channel_driver: AdcChannelDriver<'static, T, AdcDriver<'static, T::Adc>>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum BatteryError<C, V> {
-    ChargeError(C),
+#[derive(Clone, Copy, Debug)]
+pub enum BatteryError<V> {
+    ChargeError(V),
     VoltageError(V),
 }
 
 impl<C, T> Battery<C, T>
 where
-    C: InputPin,
+    C: Pin + InputPin,
     T: ADCPin,
 {
-    pub fn new(charge_pin: C, adc: impl Peripheral<P = T::Adc> + 'static, adc_pin: T) -> Self {
-        let config = AdcConfig::new()
-            .calibration(true)
-            .resolution(esp_idf_hal::adc::config::Resolution::Resolution12Bit);
-        let mut channel_config = AdcChannelConfig::default();
-        channel_config.resolution = Resolution::Resolution12Bit;
-        channel_config.attenuation = esp_idf_hal::adc::attenuation::DB_11;
+    pub fn new(
+        charge_pin: impl Peripheral<P = C> + 'static,
+        adc: impl Peripheral<P = T::Adc> + 'static,
+        adc_pin: T,
+    ) -> Result<Self, BatteryError<EspError>> {
+        let charge_pin = PinDriver::input(charge_pin).map_err(BatteryError::ChargeError)?;
 
-        let adc_driver = Rc::new(AdcDriver::new(adc).unwrap());
+        let channel_config = AdcChannelConfig {
+            resolution: Resolution::Resolution12Bit,
+            attenuation: esp_idf_hal::adc::attenuation::DB_11,
+            calibration: true,
+            ..AdcChannelConfig::default()
+        };
 
-        let adc_channel_driver =
-            AdcChannelDriver::new(adc_driver.clone(), adc_pin, &channel_config).unwrap();
+        let adc_driver = AdcDriver::new(adc).map_err(BatteryError::VoltageError)?;
 
-        Self {
+        let adc_channel_driver = AdcChannelDriver::new(adc_driver, adc_pin, &channel_config)
+            .map_err(BatteryError::VoltageError)?;
+
+        Ok(Self {
             charge_pin,
-            adc_driver,
             adc_channel_driver,
-        }
+        })
     }
 
-    pub fn charging(&mut self) -> Result<bool, BatteryError<C::Error, EspError>> {
+    pub fn charging(&mut self) -> bool {
         let mut charging = 0;
+
         for _i in 0..10 {
-            if self
-                .charge_pin
-                .is_high()
-                .map_err(BatteryError::ChargeError)?
-            {
+            if self.charge_pin.is_high() {
                 charging = charging + 1;
             }
         }
 
-        Ok(charging == 0)
+        charging == 0
     }
 
-    pub fn voltage(&mut self) -> Result<f64, BatteryError<C::Error, EspError>> {
+    pub fn voltage(&mut self) -> Result<f64, BatteryError<EspError>> {
         let v = self
-            .adc_driver
-            .read(&mut self.adc_channel_driver)
+            .adc_channel_driver
+            .read()
             .map_err(BatteryError::VoltageError)?;
-        Ok((v as f64) / 4095.0 * 3.7)
+
+        //
+        // the voltage adc is divided by a 442k and 160k resitor network.
+        // We should be receiving a reading that is 160k/602k (~0.27) of Vbat.
+        let scale = 160f64 / 602f64;
+
+        Ok((v as f64) / 4095f64 / scale * 3.7f64)
     }
 }
 

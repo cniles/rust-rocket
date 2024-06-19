@@ -1,6 +1,6 @@
 use std::{
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use esp_idf_hal::{

@@ -4,8 +4,12 @@ use std::{
 };
 
 use altimeter::Altimeter;
+use battery::Battery;
 use buzzer::Buzzer;
-use esp_idf_hal::{gpio::PinDriver, prelude::*};
+use esp_idf_hal::{
+    gpio::{ADCPin, InputPin, Pin, PinDriver},
+    prelude::*,
+};
 use esp_idf_hal::{
     i2c::{I2cConfig, I2cDriver},
     peripherals::Peripherals,
@@ -22,6 +26,16 @@ struct State {
     telemetry_addr: Option<[u8; 6]>,
 }
 
+struct Rocket<I2C, C, T>
+where
+    C: Pin + InputPin,
+    T: ADCPin,
+{
+    altimeter: Altimeter<I2C>,
+    battery: Battery<C, T>,
+    buzzer: Buzzer,
+}
+
 impl Default for State {
     fn default() -> Self {
         State {
@@ -33,6 +47,7 @@ impl Default for State {
 mod altimeter;
 mod battery;
 mod buzzer;
+mod datalink;
 
 fn print_mac_addrs(wifi: &BlockingWifi<EspWifi<'_>>) {
     let ap_mac = wifi
@@ -53,6 +68,7 @@ fn print_mac_addrs(wifi: &BlockingWifi<EspWifi<'_>>) {
         ap_mac[4],
         ap_mac[5]
     );
+
     log::info!(
         "sta mac: {:X}:{:X}:{:X}:{:X}:{:X}:{:X}",
         sta_mac[0],
@@ -68,7 +84,7 @@ fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
-    // Bind the log crate to the ESP Logging facilities
+    // Bind the log crate to the ESP Logging faciliies
     esp_idf_svc::log::EspLogger::initialize_default();
 
     log::info!("Num cpus: {}", num_cpus::get());
@@ -76,11 +92,16 @@ fn main() {
     let state = Arc::new(Mutex::new(State::default()));
 
     let peripherals = Peripherals::take().expect("Failed to obtain peripherals");
-    let charge_pin = PinDriver::input(peripherals.pins.gpio34).unwrap();
 
-    let mut battery = battery::Battery::new(charge_pin, peripherals.adc1, peripherals.pins.gpio35);
+    // Create battery driver
+    let mut battery = battery::Battery::new(
+        peripherals.pins.gpio34,
+        peripherals.adc1,
+        peripherals.pins.gpio35,
+    )
+    .unwrap();
 
-    // Create buzzer interface
+    // Create buzzer driver
     let buzzer = Buzzer::new(peripherals.pins.gpio4);
     buzzer.period(100);
     buzzer.pattern(buzzer::BuzzPattern::Beep {
@@ -96,13 +117,12 @@ fn main() {
         peripherals.pins.gpio22,
         &i2c_config,
     )
-    .expect("Failed to obtain I2C Driver");
+    .unwrap();
 
-    // Create altimeter
-    let mut altimeter =
-        Altimeter::new(Arc::new(Mutex::new(i2c_driver))).expect("altimeter available");
+    // Create altimeter driver
+    let mut altimeter = Altimeter::new(Arc::new(Mutex::new(i2c_driver))).unwrap();
 
-    // wifi connect
+    // Start datalink
     let (espnow, _wifi) = {
         let sys_loop = EspSystemEventLoop::take().unwrap();
         let nvs = EspDefaultNvsPartition::take().unwrap();
@@ -204,11 +224,12 @@ fn main() {
                 }
 
                 let metrics = format!(
-                    "metrics: {:.2}ft ({:.2}ft/{:.2}ft) charging/voltage: {}/{:.3}",
+                    "metrics: {:.2}ft ({:.2}ft/{:.2}ft) (diff: {:2}) charging/voltage: {}/{:.3}",
                     stats.altitude,
                     stats.minimum_altitude,
                     stats.maximum_altitude,
-                    battery.charging().unwrap(),
+                    stats.maximum_altitude - stats.minimum_altitude,
+                    battery.charging(),
                     battery.voltage().unwrap(),
                 );
 
