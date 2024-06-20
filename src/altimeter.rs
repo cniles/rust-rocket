@@ -41,7 +41,17 @@ impl Default for AltimeterStats {
 pub struct Altimeter<I2C> {
     sensor: bmp390::BMP390<I2C>,
     pub stats: Arc<Mutex<AltimeterStats>>,
-    sea_level_pressure: f64,
+    sea_level_pressure: Arc<Mutex<f64>>,
+}
+
+impl<I2C> Clone for Altimeter<I2C> {
+    fn clone(&self) -> Self {
+        Self {
+            sensor: self.sensor.clone(),
+            stats: self.stats.clone(),
+            sea_level_pressure: self.sea_level_pressure.clone(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -61,12 +71,12 @@ where
         Ok(Altimeter {
             sensor,
             stats,
-            sea_level_pressure: 101120.0,
+            sea_level_pressure: Arc::new(Mutex::new(101120.0)),
         })
     }
 
     pub fn sea_level_pressure(&mut self, sea_level_pressure: f64) {
-        self.sea_level_pressure = sea_level_pressure;
+        *self.sea_level_pressure.lock().unwrap() = sea_level_pressure;
     }
 
     pub fn reset_stats(&mut self) {
@@ -106,7 +116,7 @@ where
             .map_err(AltimeterError::SensorError)?;
 
         let mut stats = self.stats.lock().unwrap();
-        let altitude = calc_altitude(pressure, self.sea_level_pressure);
+        let altitude = calc_altitude(pressure, *self.sea_level_pressure.lock().unwrap());
 
         stats.altitude = altitude;
         stats.temperature = temperature;
