@@ -105,9 +105,14 @@ fn main() {
 
         loop {
             let (mac_arr, data) = command_receiver.recv().unwrap();
-            let data = String::from_utf8(data).unwrap();
 
-            log::info!("received command: {}", data);
+            let data = if let Ok(data) = String::from_utf8(data) {
+                log::info!("received command: {}", data);
+                data
+            } else {
+                log::warn!("unable to read command");
+                continue;
+            };
 
             if data.starts_with("tone") {
                 log::info!("tone");
