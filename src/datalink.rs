@@ -77,7 +77,9 @@ impl Datalink {
                 mac_arr.copy_from_slice(mac);
                 let mut vec_data = Vec::new();
                 vec_data.extend_from_slice(data);
-                command_sender.send((mac_arr, vec_data)).unwrap();
+                if let Err(e) = command_sender.send((mac_arr, vec_data)) {
+                    log::error!("{}", e);
+                }
             })
             .unwrap();
 
