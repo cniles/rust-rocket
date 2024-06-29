@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 
 use altimeter::Altimeter;
 use battery::Battery;
@@ -25,15 +22,15 @@ struct State {
     streaming: bool,
 }
 
-struct Rocket<I2C, C, T>
-where
-    C: Pin + InputPin,
-    T: ADCPin,
-{
-    altimeter: Altimeter<I2C>,
-    battery: Battery<C, T>,
-    buzzer: Buzzer,
-}
+// struct Rocket<I2C, C, T>
+// where
+//     C: Pin + InputPin,
+//     T: ADCPin,
+// {
+//     altimeter: Altimeter<I2C>,
+//     battery: Battery<C, T>,
+//     buzzer: Buzzer,
+// }
 
 impl Default for State {
     fn default() -> Self {
