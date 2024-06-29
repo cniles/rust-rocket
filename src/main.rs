@@ -187,7 +187,6 @@ fn main() {
                     if let Ok(sea_level_pressure) = sea_level_pressure {
                         log::info!("Inhg updated");
                         altimeter.sea_level_pressure(sea_level_pressure);
-                        return;
                     } else {
                         log::info!("Failed to parse pressure");
                     }
