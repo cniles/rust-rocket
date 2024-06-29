@@ -64,14 +64,18 @@ where
     I2C: I2c,
 {
     pub fn new(i2c_driver: Arc<Mutex<I2C>>) -> Result<Altimeter<I2C>, AltimeterError<I2C::Error>> {
-        let sensor = bmp390::BMP390::new(i2c_driver, DeviceAddr::AD0)
+        let mut sensor = bmp390::BMP390::new(i2c_driver, DeviceAddr::AD0)
             .map_err(AltimeterError::SensorError)?;
         let stats = Arc::new(Mutex::new(AltimeterStats::default()));
+
+        sensor
+            .write_register(Register::Config, 0b111)
+            .map_err(AltimeterError::SensorError)?;
 
         Ok(Altimeter {
             sensor,
             stats,
-            sea_level_pressure: Arc::new(Mutex::new(101120.0)),
+            sea_level_pressure: Arc::new(Mutex::new(102030.0)),
         })
     }
 
