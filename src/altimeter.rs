@@ -103,7 +103,7 @@ where
             )
             .map_err(AltimeterError::SensorError)?;
 
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(200));
 
         let temperature = self
             .sensor

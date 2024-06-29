@@ -17,6 +17,11 @@ where
     adc_channel_driver: AdcChannelDriver<'static, T, AdcDriver<'static, T::Adc>>,
 }
 
+pub struct BatteryStats {
+    pub charging: bool,
+    pub voltage: f32,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum BatteryError<V> {
     ChargeError(V),
@@ -77,6 +82,13 @@ where
         let scale = 160f64 / 602f64;
 
         Ok((v as f64) / 4095f64 / scale * 3.7f64)
+    }
+
+    pub fn stats(&mut self) -> Result<BatteryStats, BatteryError<EspError>> {
+        Ok(BatteryStats {
+            charging: self.charging(),
+            voltage: self.voltage()? as f32,
+        })
     }
 }
 

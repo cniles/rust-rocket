@@ -5,7 +5,8 @@ use std::{
 
 use altimeter::Altimeter;
 use battery::Battery;
-use buzzer::Buzzer;
+pub(crate) use buzzer::Buzzer;
+use datalink::ByteSerialize;
 use esp_idf_hal::{
     gpio::{ADCPin, InputPin, Pin},
     prelude::*,
@@ -14,12 +15,14 @@ use esp_idf_hal::{
     i2c::{I2cConfig, I2cDriver},
     peripherals::Peripherals,
 };
+use telemetry::Telemetry;
 
 use crate::datalink::Datalink;
 
 #[derive(Debug)]
 struct State {
     telemetry_addr: Option<[u8; 6]>,
+    streaming: bool,
 }
 
 struct Rocket<I2C, C, T>
@@ -36,6 +39,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             telemetry_addr: None,
+            streaming: false,
         }
     }
 }
@@ -44,6 +48,7 @@ mod altimeter;
 mod battery;
 mod buzzer;
 mod datalink;
+mod telemetry;
 
 fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -51,8 +56,6 @@ fn main() {
     esp_idf_svc::sys::link_patches();
     // Bind the log crate to the ESP Logging faciliies
     esp_idf_svc::log::EspLogger::initialize_default();
-
-    log::info!("Num cpus: {}", num_cpus::get());
 
     let state = Arc::new(Mutex::new(State::default()));
 
@@ -93,13 +96,21 @@ fn main() {
     let altimeter_stats = altimeter.stats.clone();
     let state2 = state.clone();
     let altimeter2 = altimeter.clone();
+
+    let recording = Arc::new(Mutex::new(Vec::<Telemetry>::with_capacity(900)));
+    let recording2 = recording.clone();
+    let data_sender = datalink.data_sender.clone();
+
     std::thread::spawn(move || {
         let mut altimeter = altimeter2;
         let state = state2;
+        let recording = recording2;
 
         loop {
             let (mac_arr, data) = command_receiver.recv().unwrap();
             let data = String::from_utf8(data).unwrap();
+
+            log::info!("received command: {}", data);
 
             if data.starts_with("tone") {
                 log::info!("tone");
@@ -109,14 +120,58 @@ fn main() {
 
             if data.starts_with("telemetry_on") {
                 log::info!("streaming telemetry");
-                let mut state = state.lock().unwrap();
-                state.telemetry_addr = Some(mac_arr);
+                {
+                    let mut guard = recording.lock().unwrap();
+                    guard.clear();
+                }
+                {
+                    let mut state = state.lock().unwrap();
+                    state.streaming = true;
+                    state.telemetry_addr = Some(mac_arr);
+                }
             }
 
             if data.starts_with("telemetry_off") {
                 log::info!("disabling telemetry");
                 let mut state = state.lock().unwrap();
-                state.telemetry_addr = None;
+                state.streaming = false;
+            }
+
+            if data.starts_with("re_tx") {
+                let parts: Vec<&str> = data.trim().split(' ').collect();
+                if parts.len() >= 2 {
+                    let num = parts[1].parse::<usize>();
+
+                    if let Ok(num) = num {
+                        let mut buffer = [0u8; 33];
+
+                        let telemetry = {
+                            let recording = recording.lock().unwrap();
+                            let telemetry_option = recording.get(num);
+                            if let Some(telemetry) = telemetry_option {
+                                Some(telemetry.clone())
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(telemetry) = telemetry {
+                            log::info!("retransmitting {}", num);
+                            let state = state.lock().unwrap();
+                            if let Some(addr) = state.telemetry_addr {
+                                telemetry.as_bytes(&mut buffer).unwrap();
+
+                                let data_vec = Vec::from(buffer);
+
+                                data_sender.send((addr, data_vec)).unwrap();
+                            } else {
+                                log::info!("no peer addr to retransmit to");
+                            }
+                        } else {
+                            log::info!("telemetry missing");
+                        }
+                    }
+                }
             }
 
             if data.starts_with("inhg") {
@@ -144,7 +199,11 @@ fn main() {
             }
         }
     });
+
     // Start main loop
+    let start = std::time::Instant::now();
+
+    println!("size of telemetry: {}", std::mem::size_of::<Telemetry>());
 
     loop {
         let update_result = altimeter.update_stats();
@@ -155,27 +214,36 @@ fn main() {
         } else {
             let stats = { altimeter_stats.lock().unwrap().clone() };
             let mut guard = state.lock().unwrap();
-            if let Some(ref mut addr) = guard.telemetry_addr {
-                let mut peer_addr = [0u8; 6];
-                peer_addr.copy_from_slice(addr);
+            if guard.streaming {
+                if let Some(ref mut addr) = guard.telemetry_addr {
+                    let mut peer_addr = [0u8; 6];
+                    peer_addr.copy_from_slice(addr);
 
-                let metrics = format!(
-                    "metrics: {:.2}ft ({:.2}ft/{:.2}ft) (diff: {:.2}) charging/voltage: {}/{:.3}",
-                    stats.altitude,
-                    stats.minimum_altitude,
-                    stats.maximum_altitude,
-                    stats.maximum_altitude - stats.minimum_altitude,
-                    battery.charging(),
-                    battery.voltage().unwrap(),
-                );
+                    let mut telemetry = Telemetry::from((stats, battery.stats().unwrap()));
+                    telemetry.time = start.elapsed().as_millis() as u32;
 
-                let mut data_vec = Vec::new();
+                    if {
+                        // perform scoped so as to prevent holding lock through tx.
+                        let mut guard = recording.lock().unwrap();
+                        if guard.len() < guard.capacity() {
+                            guard.push(telemetry);
+                            true
+                        } else {
+                            false
+                        }
+                    } {
+                        let mut buffer = [0u8; 33];
 
-                data_vec.extend_from_slice(metrics.as_bytes());
+                        telemetry.as_bytes(&mut buffer).unwrap();
 
-                datalink.data_sender.send((peer_addr, data_vec)).unwrap();
+                        let data_vec = Vec::from(buffer);
+
+                        datalink.data_sender.send((peer_addr, data_vec)).ok();
+                    }
+                }
             }
         }
-        std::thread::sleep(Duration::from_millis(50));
+        // update_stats on altimeter will sleep for 100ms
+        // std::thread::sleep(Duration::from_millis(50));
     }
 }

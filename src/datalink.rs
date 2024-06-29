@@ -13,6 +13,11 @@ pub struct Datalink {
     pub data_sender: Sender<([u8; 6], Vec<u8>)>,
 }
 
+pub trait ByteSerialize<T> {
+    fn as_bytes(&self, buffer: &mut [u8]) -> Result<(), ()>;
+    fn from_bytes(buffer: &[u8]) -> Result<T, ()>;
+}
+
 fn print_mac_addrs(wifi: &BlockingWifi<EspWifi<'_>>) {
     let ap_mac = wifi
         .wifi()
