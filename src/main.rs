@@ -120,7 +120,7 @@ fn main() {
                 buzzer.start();
             }
 
-            if data.starts_with("telemetry_on") {
+            if data.starts_with("ton") {
                 log::info!("streaming telemetry");
                 {
                     let mut guard = recording.lock().unwrap();
@@ -133,7 +133,7 @@ fn main() {
                 }
             }
 
-            if data.starts_with("telemetry_off") {
+            if data.starts_with("toff") {
                 log::info!("disabling telemetry");
                 let mut state = state.lock().unwrap();
                 state.streaming = false;
