@@ -1,13 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use altimeter::Altimeter;
-use battery::Battery;
+
 pub(crate) use buzzer::Buzzer;
 use datalink::ByteSerialize;
-use esp_idf_hal::{
-    gpio::{ADCPin, InputPin, Pin},
-    prelude::*,
-};
+use esp_idf_hal::prelude::*;
 use esp_idf_hal::{
     i2c::{I2cConfig, I2cDriver},
     peripherals::Peripherals,
@@ -45,6 +42,7 @@ mod altimeter;
 mod battery;
 mod buzzer;
 mod datalink;
+mod kalman;
 mod telemetry;
 
 fn main() {
@@ -219,6 +217,8 @@ fn main() {
                 if let Some(ref mut addr) = guard.telemetry_addr {
                     let mut peer_addr = [0u8; 6];
                     peer_addr.copy_from_slice(addr);
+
+                    log::info!("altitude: {}", stats.altitude);
 
                     let mut telemetry = Telemetry::from((stats, battery.stats().unwrap()));
                     telemetry.time = start.elapsed().as_millis() as u32;

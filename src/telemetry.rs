@@ -6,6 +6,7 @@ use crate::{altimeter::AltimeterStats, battery::BatteryStats, datalink::ByteSeri
 pub struct Telemetry {
     pub time: u32,
     pub altitude: f32,
+    pub pressure: f32,
     pub temperature: f32,
     pub battery_voltage: f32,
 }
@@ -14,6 +15,7 @@ impl Default for Telemetry {
     fn default() -> Self {
         Telemetry {
             time: 0,
+            pressure: 0f32,
             altitude: 0f32,
             temperature: 0f32,
             battery_voltage: 0f32,
@@ -25,6 +27,7 @@ impl From<(AltimeterStats, BatteryStats)> for Telemetry {
     fn from(value: (AltimeterStats, BatteryStats)) -> Self {
         Self {
             time: 0,
+            pressure: value.0.filtered_pressure as f32,
             altitude: value.0.altitude as f32,
             temperature: value.0.temperature as f32,
             battery_voltage: value.1.voltage,
@@ -37,6 +40,7 @@ impl ByteSerialize<Telemetry> for Telemetry {
         let mut buf = BytesMut::with_capacity(std::mem::size_of::<Telemetry>());
 
         buf.put_u32_le(self.time);
+        buf.put_f32_le(self.pressure);
         buf.put_f32_le(self.altitude);
         buf.put_f32_le(self.temperature);
         buf.put_f32_le(self.battery_voltage);
@@ -51,6 +55,7 @@ impl ByteSerialize<Telemetry> for Telemetry {
 
         Ok::<Telemetry, ()>(Telemetry {
             time: buf.get_u32_le(),
+            pressure: buf.get_f32_le(),
             altitude: buf.get_f32_le(),
             temperature: buf.get_f32_le(),
             battery_voltage: buf.get_f32_le(),

@@ -10,6 +10,43 @@ use bmp390::{
 use embedded_hal::i2c::I2c;
 
 #[derive(Copy, Clone, Debug)]
+pub struct KalmanState {
+    n: u32,
+    x: f64,
+    next_x: f64,
+    p: f64,
+    next_p: f64,
+}
+
+impl KalmanState {
+    fn new(p_0: f64, x_0: f64) -> Self {
+        KalmanState {
+            n: 0,
+            x: x_0,
+            next_x: x_0, // static
+            p: p_0,
+            next_p: p_0,
+        }
+    }
+    fn update(&mut self, r_n: f64, z_n: f64, q: f64) {
+        // update
+
+        // kalman gain
+        let k_n = self.next_p / (self.next_p + r_n);
+
+        // estimate current state
+        self.x = self.next_x + k_n * (z_n - self.next_x);
+        // estimate current variance
+        self.p = self.next_p * (1.0f64 - k_n);
+
+        self.n += 1;
+
+        self.next_x = self.x;
+        self.next_p = self.p + q;
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 pub struct AltimeterStats {
     pub maximum_altitude: f64,
     pub minimum_altitude: f64,
@@ -20,6 +57,9 @@ pub struct AltimeterStats {
     pub altitude: f64,
     pub temperature: f64,
     pub pressure: f64,
+
+    pub filtered_pressure: f64,
+    kalman_state: KalmanState,
 }
 
 impl Default for AltimeterStats {
@@ -34,6 +74,9 @@ impl Default for AltimeterStats {
             altitude: 0.0f64,
             temperature: 0.0f64,
             pressure: 0.0f64,
+            filtered_pressure: 0.0f64,
+
+            kalman_state: KalmanState::new(102178.0, 2500.0),
         }
     }
 }
@@ -69,7 +112,7 @@ where
         let stats = Arc::new(Mutex::new(AltimeterStats::default()));
 
         sensor
-            .write_register(Register::Config, 0b111)
+            .write_register(Register::Config, 0b0010)
             .map_err(AltimeterError::SensorError)?;
 
         Ok(Altimeter {
@@ -89,10 +132,11 @@ where
     }
 
     pub fn update_stats(&mut self) -> Result<(), AltimeterError<I2C::Error>> {
+        // Read from sensor
         self.sensor
             .write_register(
                 Register::Osr,
-                Osr::Select(OsrTemp::x32, OsrPress::x2).value(),
+                Osr::Select(OsrTemp::x1, OsrPress::x8).value(),
             )
             .map_err(AltimeterError::SensorError)?;
 
@@ -119,12 +163,22 @@ where
             .read_pressure(temperature)
             .map_err(AltimeterError::SensorError)?;
 
-        let mut stats = self.stats.lock().unwrap();
-        let altitude = calc_altitude(pressure, *self.sea_level_pressure.lock().unwrap());
+        // Update stats and filter pressure
 
-        stats.altitude = altitude;
+        let mut stats = self.stats.lock().unwrap();
+
         stats.temperature = temperature;
         stats.pressure = pressure;
+
+        stats.kalman_state.update(1.0f64, pressure, 0.4f64);
+        stats.filtered_pressure = stats.kalman_state.x;
+
+        let altitude = calc_altitude(
+            stats.filtered_pressure,
+            *self.sea_level_pressure.lock().unwrap(),
+        );
+
+        stats.altitude = altitude;
 
         stats.maximum_temperature = stats.maximum_temperature.max(temperature);
         stats.minimum_temperature = stats.minimum_temperature.min(temperature);
@@ -134,7 +188,6 @@ where
 
         stats.maximum_pressure = stats.maximum_pressure.max(pressure);
         stats.minimum_pressure = stats.minimum_pressure.min(pressure);
-
         Ok(())
     }
 }
