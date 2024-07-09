@@ -1,11 +1,23 @@
 use std::{
+    error::Error,
     str::FromStr,
     sync::{
-        atomic::AtomicU32,
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
+};
+
+use embedded_graphics::{
+    geometry::Point,
+    mono_font::{
+        ascii::{FONT_6X9, FONT_9X18},
+        MonoTextStyle,
+    },
+    pixelcolor::{Rgb565, RgbColor},
+    prelude::*,
+    primitives::{Line, PrimitiveStyle, Rectangle},
+    text::{renderer::TextRenderer, Text},
 };
 
 use esp_idf_hal::{
@@ -24,12 +36,16 @@ use esp_idf_svc::{
     nvs::EspDefaultNvsPartition,
     wifi::{
         AccessPointConfiguration, AuthMethod, BlockingWifi, ClientConfiguration, Configuration,
-        EspWifi, WifiDeviceId,
+        EspWifi,
     },
     ws::FrameType,
 };
-use heapless::mpmc;
-use rocket::{datalink::ByteSerialize, telemetry::Telemetry};
+
+use rocket::{
+    datalink::ByteSerialize,
+    telemetry::Telemetry,
+    ui::{Button, Ui},
+};
 
 const STACK_SIZE: usize = 10240;
 
@@ -105,6 +121,10 @@ fn main() {
 
     let peripherals = Peripherals::take().unwrap();
 
+    let (mut cyd, peripherals) = ez_cyd_rs::Cyd::new(peripherals).unwrap();
+
+    let touch_calibration = cyd.calibrate_touch();
+
     let uart_driver = make_uart_driver(
         peripherals.uart0,
         peripherals.pins.gpio1,
@@ -112,7 +132,7 @@ fn main() {
     );
 
     let uart_driver = Arc::new(Mutex::new(uart_driver));
-
+    let command_sender2 = command_sender.clone();
     // spawn thread to read commands from UART
     {
         let uart_driver = uart_driver.clone();
@@ -131,6 +151,8 @@ fn main() {
     );
 
     let msg = "<h1>Hello world</h1>";
+
+    let draw_client = client_connections.add_client();
 
     {
         http_server
@@ -189,8 +211,90 @@ fn main() {
             .unwrap();
     }
 
+    cyd.display
+        .clear(Rgb565::BLACK)
+        .map_err(|_| Box::<dyn Error>::from("clear display"))
+        .unwrap();
+
+    let mut chart_x = 0;
+    let mut chart_y = 0;
+
+    let mut ui = Ui::new(320, 240);
+
+    ui.touch_calibration(touch_calibration.unwrap());
+
+    let b1 = Button::new(
+        (1, 215).into(),
+        (25, 25).into(),
+        "TONE",
+        Box::new(move || {
+            command_sender2.send("tone".to_string()).unwrap();
+        }),
+    );
+
+    ui.add_element(Box::new(b1));
+
     loop {
-        std::thread::sleep(Duration::from_millis(20));
+        // std::thread::sleep(Duration::from_millis(100));
+        let touch = cyd.try_touch().unwrap();
+        ui.handle_touch((touch.0, touch.1, touch.2));
+
+        let telemetry = draw_client.recv_timeout(Duration::from_millis(10));
+        // Create text style
+        let style = MonoTextStyle::new(&FONT_6X9, Rgb565::GREEN);
+
+        ui.draw(&mut cyd.display);
+
+        if let Ok(telemetry) = telemetry {
+            Rectangle::new((25, 0).into(), Size::new(80, 13))
+                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                .draw(&mut cyd.display)
+                .unwrap();
+            let text = format!("Alt: {:.2}", telemetry.altitude);
+            Text::new(&text, Point::new(5, 12), style)
+                .draw(&mut cyd.display)
+                .map_err(|_| Box::<dyn Error>::from("draw hello"))
+                .unwrap();
+
+            Rectangle::new((25, 14).into(), Size::new(50, 13))
+                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                .draw(&mut cyd.display)
+                .unwrap();
+            let text = format!(" V+: {:.2}", telemetry.battery_voltage);
+            Text::new(&text, Point::new(5, 26), style)
+                .draw(&mut cyd.display)
+                .map_err(|_| Box::<dyn Error>::from("draw hello"))
+                .unwrap();
+
+            Rectangle::new((25, 28).into(), Size::new(100, 13))
+                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                .draw(&mut cyd.display)
+                .unwrap();
+            let text = format!("Prs: {:.2}", telemetry.pressure);
+            Text::new(&text, Point::new(5, 40), style)
+                .draw(&mut cyd.display)
+                .map_err(|_| Box::<dyn Error>::from("draw hello"))
+                .unwrap();
+
+            let altitude = telemetry.altitude / 2.0;
+            Line::new(
+                Point::new(chart_x, 210 - altitude as i32),
+                Point::new(chart_x, 210 - chart_y),
+            )
+            .into_styled(PrimitiveStyle::with_stroke(Rgb565::GREEN, 1))
+            .draw(&mut cyd.display)
+            .map_err(|_| Box::<dyn Error>::from("draw chart"))
+            .unwrap();
+
+            chart_x = (chart_x + 1) % 320;
+            chart_y = altitude as i32;
+
+            Line::new(Point::new(chart_x, 210), Point::new(chart_x, 60))
+                .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLACK, 1))
+                .draw(&mut cyd.display)
+                .map_err(|_| Box::<dyn Error>::from("draw chart"))
+                .unwrap();
+        }
     }
 }
 
@@ -245,7 +349,7 @@ fn wifi_thread(
 
             // only send if we have a listener or
             let telemetry = Telemetry::from_bytes(&data).unwrap();
-            log::info!("{:?}", telemetry);
+            // log::info!("{:?}", telemetry);
 
             let mut guard = client_connections.clients.lock().unwrap();
 
@@ -283,7 +387,7 @@ fn wifi_thread(
             if let Ok(s) = command_receiver.try_recv() {
                 if s.len() != 0 {
                     if let Err(e) = espnow.send(peer, s.as_bytes()) {
-                        log::error!("failed to send: {}", e);
+                        log::error!("Failed to send: {}", e);
                     } else {
                         log::info!("Sent {} bytes", s.len());
                     }

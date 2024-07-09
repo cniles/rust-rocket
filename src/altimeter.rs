@@ -111,8 +111,12 @@ where
             .map_err(AltimeterError::SensorError)?;
         let stats = Arc::new(Mutex::new(AltimeterStats::default()));
 
+        sensor.soft_reset().map_err(AltimeterError::SensorError)?;
+
+        std::thread::sleep(Duration::from_millis(10));
+
         sensor
-            .write_register(Register::Config, 0b0010)
+            .write_register(Register::Config, 0b0000)
             .map_err(AltimeterError::SensorError)?;
 
         Ok(Altimeter {
@@ -170,7 +174,7 @@ where
         stats.temperature = temperature;
         stats.pressure = pressure;
 
-        stats.kalman_state.update(1.0f64, pressure, 0.4f64);
+        stats.kalman_state.update(0.16f64, pressure, 0.025f64);
         stats.filtered_pressure = stats.kalman_state.x;
 
         let altitude = calc_altitude(

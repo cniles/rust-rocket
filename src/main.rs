@@ -44,6 +44,7 @@ mod buzzer;
 mod datalink;
 mod kalman;
 mod telemetry;
+mod ui;
 
 fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -95,6 +96,12 @@ fn main() {
     let recording = Arc::new(Mutex::new(Vec::<Telemetry>::with_capacity(900)));
     let recording2 = recording.clone();
     let data_sender = datalink.data_sender.clone();
+
+    // poor broken screen
+    let touch_scale = (
+        (-453.85041551246536, 267.09141274238226),
+        (-476.5561372891216, 372.7632344386271),
+    );
 
     std::thread::spawn(move || {
         let mut altimeter = altimeter2;
@@ -199,7 +206,7 @@ fn main() {
         }
     });
 
-    // Start main loop
+    // Start main loop responsible for updating th etouch display and reading input
     let start = std::time::Instant::now();
 
     println!("size of telemetry: {}", std::mem::size_of::<Telemetry>());

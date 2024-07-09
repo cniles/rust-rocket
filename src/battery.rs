@@ -1,7 +1,7 @@
 use esp_idf_hal::{
     adc::{
-        config::Resolution,
         oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
+        Resolution,
     },
     gpio::{ADCPin, Input, InputPin, Pin, PinDriver},
     peripheral::Peripheral,
