@@ -2,22 +2,20 @@ use std::{
     error::Error,
     str::FromStr,
     sync::{
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use embedded_graphics::{
     geometry::Point,
-    mono_font::{
-        ascii::{FONT_6X9, FONT_9X18},
-        MonoTextStyle,
-    },
+    mono_font::{ascii::FONT_6X9, MonoTextStyle},
     pixelcolor::{Rgb565, RgbColor},
     prelude::*,
     primitives::{Line, PrimitiveStyle, Rectangle},
-    text::{renderer::TextRenderer, Text},
+    text::Text,
 };
 
 use esp_idf_hal::{
@@ -44,7 +42,7 @@ use esp_idf_svc::{
 use rocket::{
     datalink::ByteSerialize,
     telemetry::Telemetry,
-    ui::{Button, Ui},
+    ui::{button::Button, ui::Ui},
 };
 
 const STACK_SIZE: usize = 10240;
@@ -223,77 +221,138 @@ fn main() {
 
     ui.touch_calibration(touch_calibration.unwrap());
 
+    let mut bp = 1;
+
+    let command_sender3 = command_sender2.clone();
     let b1 = Button::new(
-        (1, 215).into(),
+        (bp, 215).into(),
+        (25, 25).into(),
+        "TON",
+        Box::new(move || {
+            command_sender3.send("ton ".to_string()).unwrap();
+        }),
+    );
+
+    bp += 26;
+    let command_sender3 = command_sender2.clone();
+    let b2 = Button::new(
+        (bp, 215).into(),
+        (25, 25).into(),
+        "TOFF",
+        Box::new(move || {
+            command_sender3.send("toff ".to_string()).unwrap();
+        }),
+    );
+
+    bp += 26;
+    let command_sender3 = command_sender2.clone();
+    let b3 = Button::new(
+        (bp, 215).into(),
         (25, 25).into(),
         "TONE",
         Box::new(move || {
-            command_sender2.send("tone".to_string()).unwrap();
+            command_sender3.send("tone ".to_string()).unwrap();
+        }),
+    );
+
+    bp += 26;
+    let command_sender3 = command_sender2.clone();
+    let b4 = Button::new(
+        (bp, 215).into(),
+        (25, 25).into(),
+        "RST",
+        Box::new(move || {
+            command_sender3.send("reset ".to_string()).unwrap();
+        }),
+    );
+
+    let clear_flag = Arc::new(AtomicBool::new(false));
+    bp += 26;
+    let clear_flag2 = clear_flag.clone();
+    let b5 = Button::new(
+        (bp, 215).into(),
+        (25, 25).into(),
+        "CLR",
+        Box::new(move || {
+            clear_flag2.store(true, Ordering::Relaxed);
         }),
     );
 
     ui.add_element(Box::new(b1));
+    ui.add_element(Box::new(b2));
+    ui.add_element(Box::new(b3));
+    ui.add_element(Box::new(b4));
+    ui.add_element(Box::new(b5));
 
     loop {
-        // std::thread::sleep(Duration::from_millis(100));
+        if clear_flag.load(Ordering::Relaxed) {
+            cyd.display.clear(Rgb565::BLACK).unwrap();
+            ui.dirty_all();
+            clear_flag.store(false, Ordering::Relaxed);
+        }
+
         let touch = cyd.try_touch().unwrap();
         ui.handle_touch((touch.0, touch.1, touch.2));
 
-        let telemetry = draw_client.recv_timeout(Duration::from_millis(10));
-        // Create text style
-        let style = MonoTextStyle::new(&FONT_6X9, Rgb565::GREEN);
+        loop {
+            let telemetry = draw_client.recv_timeout(Duration::from_millis(10));
+            // Create text style
+            let style = MonoTextStyle::new(&FONT_6X9, Rgb565::GREEN);
 
-        ui.draw(&mut cyd.display);
+            ui.draw(&mut cyd.display);
 
-        if let Ok(telemetry) = telemetry {
-            Rectangle::new((25, 0).into(), Size::new(80, 13))
-                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                .draw(&mut cyd.display)
-                .unwrap();
-            let text = format!("Alt: {:.2}", telemetry.altitude);
-            Text::new(&text, Point::new(5, 12), style)
-                .draw(&mut cyd.display)
-                .map_err(|_| Box::<dyn Error>::from("draw hello"))
-                .unwrap();
+            if let Ok(telemetry) = telemetry {
+                Rectangle::new((25, 0).into(), Size::new(80, 13))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                    .draw(&mut cyd.display)
+                    .unwrap();
+                let text = format!("Alt: {:.2}", telemetry.altitude);
+                Text::new(&text, Point::new(5, 12), style)
+                    .draw(&mut cyd.display)
+                    .map_err(|_| Box::<dyn Error>::from("draw hello"))
+                    .unwrap();
 
-            Rectangle::new((25, 14).into(), Size::new(50, 13))
-                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                .draw(&mut cyd.display)
-                .unwrap();
-            let text = format!(" V+: {:.2}", telemetry.battery_voltage);
-            Text::new(&text, Point::new(5, 26), style)
-                .draw(&mut cyd.display)
-                .map_err(|_| Box::<dyn Error>::from("draw hello"))
-                .unwrap();
+                Rectangle::new((25, 14).into(), Size::new(50, 13))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                    .draw(&mut cyd.display)
+                    .unwrap();
+                let text = format!(" V+: {:.2}", telemetry.battery_voltage);
+                Text::new(&text, Point::new(5, 26), style)
+                    .draw(&mut cyd.display)
+                    .map_err(|_| Box::<dyn Error>::from("draw hello"))
+                    .unwrap();
 
-            Rectangle::new((25, 28).into(), Size::new(100, 13))
-                .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                .draw(&mut cyd.display)
-                .unwrap();
-            let text = format!("Prs: {:.2}", telemetry.pressure);
-            Text::new(&text, Point::new(5, 40), style)
-                .draw(&mut cyd.display)
-                .map_err(|_| Box::<dyn Error>::from("draw hello"))
-                .unwrap();
+                Rectangle::new((25, 28).into(), Size::new(100, 13))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                    .draw(&mut cyd.display)
+                    .unwrap();
+                let text = format!("Prs: {:.2}", telemetry.pressure);
+                Text::new(&text, Point::new(5, 40), style)
+                    .draw(&mut cyd.display)
+                    .map_err(|_| Box::<dyn Error>::from("draw hello"))
+                    .unwrap();
 
-            let altitude = telemetry.altitude / 2.0;
-            Line::new(
-                Point::new(chart_x, 210 - altitude as i32),
-                Point::new(chart_x, 210 - chart_y),
-            )
-            .into_styled(PrimitiveStyle::with_stroke(Rgb565::GREEN, 1))
-            .draw(&mut cyd.display)
-            .map_err(|_| Box::<dyn Error>::from("draw chart"))
-            .unwrap();
-
-            chart_x = (chart_x + 1) % 320;
-            chart_y = altitude as i32;
-
-            Line::new(Point::new(chart_x, 210), Point::new(chart_x, 60))
-                .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLACK, 1))
+                let altitude = telemetry.altitude / 2.0;
+                Line::new(
+                    Point::new(chart_x, 210 - altitude as i32),
+                    Point::new(chart_x, 210 - chart_y),
+                )
+                .into_styled(PrimitiveStyle::with_stroke(Rgb565::GREEN, 1))
                 .draw(&mut cyd.display)
                 .map_err(|_| Box::<dyn Error>::from("draw chart"))
                 .unwrap();
+
+                chart_x = (chart_x + 1) % 320;
+                chart_y = altitude as i32;
+
+                Line::new(Point::new(chart_x, 210), Point::new(chart_x, 60))
+                    .into_styled(PrimitiveStyle::with_stroke(Rgb565::BLACK, 1))
+                    .draw(&mut cyd.display)
+                    .map_err(|_| Box::<dyn Error>::from("draw chart"))
+                    .unwrap();
+            } else {
+                break;
+            }
         }
     }
 }

@@ -1,10 +1,7 @@
 use embedded_graphics::{
-    geometry::{Dimensions, Point, Size},
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    geometry::{Point, Size},
     pixelcolor::{Rgb565, RgbColor},
-    primitives::{OffsetOutline, Primitive, PrimitiveStyleBuilder, Rectangle, StyledDrawable},
-    text::Text,
-    Drawable,
+    primitives::Rectangle,
 };
 use ez_cyd_rs::CydDisplay;
 
@@ -30,6 +27,8 @@ pub struct Ui {
 
     touch_state: TouchState,
     touch_calibration: ((f64, f64), (f64, f64)),
+
+    dirty_all: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -56,11 +55,26 @@ pub enum UiEvent {
     Tap(TouchEvent),
 }
 
+pub enum UiDimension {
+    Fixed(i16),
+    Auto,
+    Percent(f32),
+}
+
+pub struct UiSize(UiDimension, UiDimension);
+
+pub enum UiLayout {
+    Horizontal,
+    Vertical,
+}
+
 pub trait UiElement {
+    // type Item;
     fn handle_event(&mut self, event: UiEvent);
     fn dirty(&self) -> bool;
     fn bounding_box(&self) -> Rectangle;
     fn draw(&mut self, display: &mut CydDisplay);
+    fn size(&self) -> UiSize;
 }
 
 impl Ui {
@@ -68,6 +82,7 @@ impl Ui {
         Self {
             width,
             height,
+            dirty_all: true,
             touch_state: TouchState {
                 x: 0,
                 y: 0,
@@ -77,6 +92,10 @@ impl Ui {
             elements: Vec::new(),
             touch_calibration: TOUCH_CALIBRATION,
         }
+    }
+
+    pub fn dirty_all(&mut self) {
+        self.dirty_all = true;
     }
 
     pub fn touch_calibration(&mut self, touch_calibration: ((f64, f64), (f64, f64))) {
@@ -93,10 +112,11 @@ impl Ui {
 
     pub fn draw(&mut self, display: &mut CydDisplay) {
         for e in self.elements.as_mut_slice() {
-            if e.dirty() {
+            if e.dirty() || self.dirty_all {
                 e.draw(display);
             }
         }
+        self.dirty_all = false;
     }
 
     fn process_touch(&mut self, touch: (f64, f64, f64)) -> TouchEvent {
@@ -117,7 +137,6 @@ impl Ui {
             TouchStatus::Up
         };
 
-        // based on previous state
         let event = match self.touch_state.status {
             TouchStatus::Up => {
                 if let TouchStatus::Down = status {
@@ -189,10 +208,10 @@ impl Ui {
     }
 }
 
-struct ColorTheme {
-    text_color: Rgb565,
-    fill: Rgb565,
-    outline: Rgb565,
+pub struct ColorTheme {
+    pub text_color: Rgb565,
+    pub fill: Rgb565,
+    pub outline: Rgb565,
 }
 
 impl Default for ColorTheme {
@@ -205,101 +224,48 @@ impl Default for ColorTheme {
     }
 }
 
-pub struct Button<'a> {
-    point: Point,
+pub struct Panel {
+    position: Point,
     size: Size,
-    text: &'a str,
-    color_theme: ColorTheme,
-    hover_color_theme: ColorTheme,
-    dirty: bool,
-    hover: bool,
-    on_click: Box<dyn Fn() -> ()>,
+    // padding: u16,
+    // spacing: u16,
+    layout: UiLayout,
+    children: Vec<Box<dyn UiElement>>,
 }
 
-impl<'a> Button<'a> {
-    pub fn new(point: Point, size: Size, text: &'a str, on_click: Box<dyn Fn() -> ()>) -> Self {
+impl Panel {
+    pub fn new(position: Point, size: Size, layout: UiLayout) -> Self {
         Self {
-            point,
+            position,
             size,
-            text,
-            dirty: true,
-            hover: false,
-            color_theme: ColorTheme {
-                text_color: Rgb565::GREEN,
-                outline: Rgb565::GREEN,
-                ..ColorTheme::default()
-            },
-            hover_color_theme: ColorTheme {
-                fill: Rgb565::GREEN,
-                outline: Rgb565::GREEN,
-                ..ColorTheme::default()
-            },
-            on_click,
+            layout,
+            children: Vec::new(),
         }
     }
+
+    pub fn add_element(&mut self, element: Box<dyn UiElement>) {
+        self.children.push(element);
+    }
 }
 
-impl<'a> UiElement for Button<'a> {
-    fn dirty(&self) -> bool {
-        self.dirty
+impl UiElement for Panel {
+    fn handle_event(&mut self, event: UiEvent) {
+        todo!()
     }
 
-    fn draw(&mut self, display: &mut CydDisplay) {
-        let theme = if self.hover {
-            &self.hover_color_theme
-        } else {
-            &self.color_theme
-        };
-
-        let style = PrimitiveStyleBuilder::new()
-            .stroke_color(theme.outline)
-            .fill_color(theme.fill)
-            .stroke_width(1)
-            .build();
-
-        Rectangle::new(self.point, self.size)
-            .into_styled(style)
-            .draw(display)
-            .unwrap();
-
-        let text_style = MonoTextStyle::new(&FONT_6X10, theme.text_color);
-
-        let mut text = Text::new(self.text, self.point, text_style);
-
-        let text_size = text.bounding_box().size;
-
-        text.position = (
-            self.size.width as i32 / 2 - text_size.width as i32 / 2 + self.point.x,
-            self.size.height as i32 / 2 + text_size.height as i32 / 2 + self.point.y,
-        )
-            .into();
-
-        text.draw(display).unwrap();
-
-        self.dirty = false;
+    fn dirty(&self) -> bool {
+        false
     }
 
     fn bounding_box(&self) -> Rectangle {
-        Rectangle {
-            top_left: self.point,
-            size: self.size,
-        }
+        Rectangle::new(self.position, self.size)
     }
 
-    fn handle_event(&mut self, event: UiEvent) {
-        // log::info!("Ui Event: {:?}", event);
-        self.dirty = true;
-        match event {
-            UiEvent::TouchEnter(_) => {
-                self.hover = true;
-            }
-            UiEvent::TouchLeave(_) => {
-                self.hover = false;
-            }
-            UiEvent::Tap(_) => {
-                self.hover = false;
-                (*self.on_click)();
-            }
-        }
+    fn draw(&mut self, display: &mut CydDisplay) {
+        todo!();
+    }
+
+    fn size(&self) -> UiSize {
+        todo!()
     }
 }
