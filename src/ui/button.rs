@@ -10,10 +10,10 @@ use ez_cyd_rs::CydDisplay;
 
 use super::ui::{ColorTheme, UiElement, UiEvent, UiSize};
 
-pub struct Button<'a> {
+pub struct Button {
     point: Point,
     size: Size,
-    text: &'a str,
+    text: String,
     color_theme: ColorTheme,
     hover_color_theme: ColorTheme,
     dirty: bool,
@@ -21,8 +21,8 @@ pub struct Button<'a> {
     on_click: Box<dyn Fn() -> ()>,
 }
 
-impl<'a> Button<'a> {
-    pub fn new(point: Point, size: Size, text: &'a str, on_click: Box<dyn Fn() -> ()>) -> Self {
+impl Button {
+    pub fn new(point: Point, size: Size, text: String, on_click: Box<dyn Fn() -> ()>) -> Self {
         Self {
             point,
             size,
@@ -44,7 +44,7 @@ impl<'a> Button<'a> {
     }
 }
 
-impl<'a> UiElement for Button<'a> {
+impl UiElement for Button {
     fn dirty(&self) -> bool {
         self.dirty
     }
@@ -69,7 +69,7 @@ impl<'a> UiElement for Button<'a> {
 
         let text_style = MonoTextStyle::new(&FONT_6X10, theme.text_color);
 
-        let mut text = Text::new(self.text, self.point, text_style);
+        let mut text = Text::new(&self.text, self.point, text_style);
 
         let text_size = text.bounding_box().size;
 

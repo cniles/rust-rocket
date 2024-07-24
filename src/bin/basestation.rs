@@ -2,7 +2,7 @@ use std::{
     error::Error,
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::Ordering,
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
@@ -21,7 +21,6 @@ use embedded_graphics::{
 use esp_idf_hal::{
     delay::NON_BLOCK,
     gpio::{Gpio0, Gpio1, Gpio3},
-    io::Write,
     peripherals::Peripherals,
     sys::EspError,
     uart::{config::Config, UartDriver, UART0},
@@ -39,13 +38,14 @@ use esp_idf_svc::{
     ws::FrameType,
 };
 
+use ez_cyd_rs::CydDisplay;
 use rocket::{
-    datalink::ByteSerialize,
-    telemetry::Telemetry,
-    ui::{button::Button, ui::Ui},
+    control_panel::init_control_panel, datalink::ByteSerialize, keypad::init_keypad,
+    telemetry::Telemetry, ui::ui::Ui,
 };
 
 const STACK_SIZE: usize = 10240;
+const WEB_SERVICES_ON: bool = false;
 
 #[derive(Clone)]
 struct ClientConnection {
@@ -109,6 +109,39 @@ fn make_uart_driver(uart0: UART0, gpio1: Gpio1, gpio3: Gpio3) -> UartDriver<'sta
     .unwrap()
 }
 
+fn draw_telemetry(telemetry: &Telemetry, display: &mut CydDisplay) {
+    let style = MonoTextStyle::new(&FONT_6X9, Rgb565::GREEN);
+    Rectangle::new((25, 0).into(), Size::new(80, 13))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(display)
+        .unwrap();
+    let text = format!("Alt: {:.2}", telemetry.altitude);
+    Text::new(&text, Point::new(5, 12), style)
+        .draw(display)
+        .map_err(|_| Box::<dyn Error>::from("draw hello"))
+        .unwrap();
+
+    Rectangle::new((25, 14).into(), Size::new(50, 13))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(display)
+        .unwrap();
+    let text = format!(" V+: {:.2}", telemetry.battery_voltage);
+    Text::new(&text, Point::new(5, 26), style)
+        .draw(display)
+        .map_err(|_| Box::<dyn Error>::from("draw hello"))
+        .unwrap();
+
+    Rectangle::new((25, 28).into(), Size::new(100, 13))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+        .draw(display)
+        .unwrap();
+    let text = format!("Prs: {:.2}", telemetry.pressure);
+    Text::new(&text, Point::new(5, 40), style)
+        .draw(display)
+        .map_err(|_| Box::<dyn Error>::from("draw hello"))
+        .unwrap();
+}
+
 fn main() {
     esp_idf_svc::sys::link_patches();
 
@@ -142,27 +175,18 @@ fn main() {
 
     let client_connections = ClientConnectionList::new();
 
-    let mut http_server = wifi_thread(
+    let http_server = wifi_thread(
         peripherals.modem,
         client_connections.clone(),
         command_receiver,
     );
 
-    let msg = "<h1>Hello world</h1>";
-
     let draw_client = client_connections.add_client();
 
-    {
+    if WEB_SERVICES_ON {
         http_server
-            .fn_handler("/stats", esp_idf_svc::http::Method::Get, |req| {
-                req.into_ok_response()
-                    .unwrap()
-                    .write_all(msg.as_bytes())
-                    .unwrap();
-                Ok::<(), EspError>(())
-            })
             .unwrap()
-            .ws_handler("/ws/test", move |ws| {
+            .ws_handler("/ws/telemetry", move |ws| {
                 if ws.is_new() {
                     println!("new ws connection");
                     let mut ws = ws.create_detached_sender().unwrap();
@@ -221,70 +245,23 @@ fn main() {
 
     ui.touch_calibration(touch_calibration.unwrap());
 
-    let mut bp = 1;
-
-    let command_sender3 = command_sender2.clone();
-    let b1 = Button::new(
-        (bp, 215).into(),
-        (25, 25).into(),
-        "TON",
-        Box::new(move || {
-            command_sender3.send("ton ".to_string()).unwrap();
-        }),
-    );
-
-    bp += 26;
-    let command_sender3 = command_sender2.clone();
-    let b2 = Button::new(
-        (bp, 215).into(),
-        (25, 25).into(),
-        "TOFF",
-        Box::new(move || {
-            command_sender3.send("toff ".to_string()).unwrap();
-        }),
-    );
-
-    bp += 26;
-    let command_sender3 = command_sender2.clone();
-    let b3 = Button::new(
-        (bp, 215).into(),
-        (25, 25).into(),
-        "TONE",
-        Box::new(move || {
-            command_sender3.send("tone ".to_string()).unwrap();
-        }),
-    );
-
-    bp += 26;
-    let command_sender3 = command_sender2.clone();
-    let b4 = Button::new(
-        (bp, 215).into(),
-        (25, 25).into(),
-        "RST",
-        Box::new(move || {
-            command_sender3.send("reset ".to_string()).unwrap();
-        }),
-    );
-
-    let clear_flag = Arc::new(AtomicBool::new(false));
-    bp += 26;
-    let clear_flag2 = clear_flag.clone();
-    let b5 = Button::new(
-        (bp, 215).into(),
-        (25, 25).into(),
-        "CLR",
-        Box::new(move || {
-            clear_flag2.store(true, Ordering::Relaxed);
-        }),
-    );
-
-    ui.add_element(Box::new(b1));
-    ui.add_element(Box::new(b2));
-    ui.add_element(Box::new(b3));
-    ui.add_element(Box::new(b4));
-    ui.add_element(Box::new(b5));
+    let (clear_flag, psl_flag) = init_control_panel(command_sender2, &mut ui);
 
     loop {
+        if psl_flag.load(Ordering::Relaxed) {
+            // show psl keypad
+            ui.clear();
+            init_keypad(
+                &mut ui,
+                Box::new(|key: &str| {
+                    log::info!("clicked {}", key);
+                }),
+            );
+            ui.dirty_all();
+            psl_flag.store(false, Ordering::Relaxed);
+            cyd.display.clear(Rgb565::BLACK).unwrap();
+        }
+
         if clear_flag.load(Ordering::Relaxed) {
             cyd.display.clear(Rgb565::BLACK).unwrap();
             ui.dirty_all();
@@ -294,44 +271,14 @@ fn main() {
         let touch = cyd.try_touch().unwrap();
         ui.handle_touch((touch.0, touch.1, touch.2));
 
+        ui.draw(&mut cyd.display);
+
         loop {
             let telemetry = draw_client.recv_timeout(Duration::from_millis(10));
             // Create text style
-            let style = MonoTextStyle::new(&FONT_6X9, Rgb565::GREEN);
-
-            ui.draw(&mut cyd.display);
 
             if let Ok(telemetry) = telemetry {
-                Rectangle::new((25, 0).into(), Size::new(80, 13))
-                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                    .draw(&mut cyd.display)
-                    .unwrap();
-                let text = format!("Alt: {:.2}", telemetry.altitude);
-                Text::new(&text, Point::new(5, 12), style)
-                    .draw(&mut cyd.display)
-                    .map_err(|_| Box::<dyn Error>::from("draw hello"))
-                    .unwrap();
-
-                Rectangle::new((25, 14).into(), Size::new(50, 13))
-                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                    .draw(&mut cyd.display)
-                    .unwrap();
-                let text = format!(" V+: {:.2}", telemetry.battery_voltage);
-                Text::new(&text, Point::new(5, 26), style)
-                    .draw(&mut cyd.display)
-                    .map_err(|_| Box::<dyn Error>::from("draw hello"))
-                    .unwrap();
-
-                Rectangle::new((25, 28).into(), Size::new(100, 13))
-                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                    .draw(&mut cyd.display)
-                    .unwrap();
-                let text = format!("Prs: {:.2}", telemetry.pressure);
-                Text::new(&text, Point::new(5, 40), style)
-                    .draw(&mut cyd.display)
-                    .map_err(|_| Box::<dyn Error>::from("draw hello"))
-                    .unwrap();
-
+                draw_telemetry(&telemetry, &mut cyd.display);
                 let altitude = telemetry.altitude / 2.0;
                 Line::new(
                     Point::new(chart_x, 210 - altitude as i32),
@@ -361,7 +308,7 @@ fn wifi_thread(
     modem: esp_idf_hal::modem::Modem,
     client_connections: ClientConnectionList,
     command_receiver: Receiver<String>,
-) -> EspHttpServer<'static> {
+) -> Option<EspHttpServer<'static>> {
     let sys_loop = EspSystemEventLoop::take().unwrap();
     let nvs = EspDefaultNvsPartition::take().unwrap();
     let esp_wifi = EspWifi::new(modem, sys_loop.clone(), Some(nvs)).unwrap();
@@ -456,10 +403,14 @@ fn wifi_thread(
         }
     });
 
-    let http_server_config = esp_idf_svc::http::server::Configuration {
-        stack_size: STACK_SIZE,
-        ..Default::default()
-    };
+    if WEB_SERVICES_ON {
+        let http_server_config = esp_idf_svc::http::server::Configuration {
+            stack_size: STACK_SIZE,
+            ..Default::default()
+        };
 
-    EspHttpServer::new(&http_server_config).unwrap()
+        Some(EspHttpServer::new(&http_server_config).unwrap())
+    } else {
+        None
+    }
 }

@@ -129,7 +129,7 @@ impl Ui {
         let x = (ay * ty + by) as i32;
         let y = (ax * tx + bx) as i32;
 
-        log::info!("touch at {} {}", x, y);
+        // log::info!("touch at {} {}", x, y);
 
         let status = if tz >= Z_THRESHOLD {
             TouchStatus::Down
@@ -221,51 +221,5 @@ impl Default for ColorTheme {
             fill: Rgb565::BLACK,
             outline: Rgb565::BLACK,
         }
-    }
-}
-
-pub struct Panel {
-    position: Point,
-    size: Size,
-    // padding: u16,
-    // spacing: u16,
-    layout: UiLayout,
-    children: Vec<Box<dyn UiElement>>,
-}
-
-impl Panel {
-    pub fn new(position: Point, size: Size, layout: UiLayout) -> Self {
-        Self {
-            position,
-            size,
-            layout,
-            children: Vec::new(),
-        }
-    }
-
-    pub fn add_element(&mut self, element: Box<dyn UiElement>) {
-        self.children.push(element);
-    }
-}
-
-impl UiElement for Panel {
-    fn handle_event(&mut self, event: UiEvent) {
-        todo!()
-    }
-
-    fn dirty(&self) -> bool {
-        false
-    }
-
-    fn bounding_box(&self) -> Rectangle {
-        Rectangle::new(self.position, self.size)
-    }
-
-    fn draw(&mut self, display: &mut CydDisplay) {
-        todo!();
-    }
-
-    fn size(&self) -> UiSize {
-        todo!()
     }
 }
