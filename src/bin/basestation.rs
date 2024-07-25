@@ -1,8 +1,10 @@
 use std::{
+    cell::RefCell,
     error::Error,
+    rc::Rc,
     str::FromStr,
     sync::{
-        atomic::Ordering,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
@@ -40,8 +42,11 @@ use esp_idf_svc::{
 
 use ez_cyd_rs::CydDisplay;
 use rocket::{
-    control_panel::init_control_panel, datalink::ByteSerialize, keypad::init_keypad,
-    telemetry::Telemetry, ui::ui::Ui,
+    control_panel::init_control_panel,
+    datalink::ByteSerialize,
+    keypad::init_keypad,
+    telemetry::Telemetry,
+    ui::{text::Text as UiText, ui::Ui},
 };
 
 const STACK_SIZE: usize = 10240;
@@ -156,22 +161,20 @@ fn main() {
 
     let touch_calibration = cyd.calibrate_touch();
 
-    let uart_driver = make_uart_driver(
-        peripherals.uart0,
-        peripherals.pins.gpio1,
-        peripherals.pins.gpio3,
-    );
-
-    let uart_driver = Arc::new(Mutex::new(uart_driver));
-    let command_sender2 = command_sender.clone();
+    // let uart_driver = make_uart_driver(
+    //     peripherals.uart0,
+    //     peripherals.pins.gpio1,
+    //     peripherals.pins.gpio3,
+    // );
+    // let uart_driver = Arc::new(Mutex::new(uart_driver));
     // spawn thread to read commands from UART
-    {
-        let uart_driver = uart_driver.clone();
-        std::thread::spawn(move || loop {
-            let s = read_input(&uart_driver);
-            command_sender.send(s).unwrap();
-        });
-    }
+    // {
+    //     let uart_driver = uart_driver.clone();
+    //     std::thread::spawn(move || loop {
+    //         let s = read_input(&uart_driver);
+    //         command_sender.send(s).unwrap();
+    //     });
+    // }
 
     let client_connections = ClientConnectionList::new();
 
@@ -244,29 +247,51 @@ fn main() {
     let mut ui = Ui::new(320, 240);
 
     ui.touch_calibration(touch_calibration.unwrap());
+    ui.add_element(Box::new(UiText::new("0".to_string(), Point::new(0, 0))));
 
-    let (clear_flag, psl_flag) = init_control_panel(command_sender2, &mut ui);
+    let (mut clear_flag, mut psl_flag) = init_control_panel(command_sender.clone(), &mut ui);
+    let psl = Rc::new(RefCell::new("101320".to_string()));
+
+    let psl_set_flag = Rc::new(RefCell::new(false));
 
     loop {
         if psl_flag.load(Ordering::Relaxed) {
             // show psl keypad
             ui.clear();
+            let psl_set_flag1 = psl_set_flag.clone();
+            let psl_set_flag2 = psl_set_flag.clone();
+            let psl = psl.clone();
             init_keypad(
                 &mut ui,
-                Box::new(|key: &str| {
-                    log::info!("clicked {}", key);
+                Box::new(move |key: &str| {
+                    *psl_set_flag1.borrow_mut() = true;
+                    *psl.borrow_mut() = key.to_string()
+                }),
+                Box::new(move || {
+                    *psl_set_flag2.borrow_mut() = true;
                 }),
             );
             ui.dirty_all();
-            psl_flag.store(false, Ordering::Relaxed);
             cyd.display.clear(Rgb565::BLACK).unwrap();
         }
 
         if clear_flag.load(Ordering::Relaxed) {
             cyd.display.clear(Rgb565::BLACK).unwrap();
             ui.dirty_all();
-            clear_flag.store(false, Ordering::Relaxed);
         }
+
+        if *psl_set_flag.borrow() {
+            cyd.display.clear(Rgb565::BLACK).unwrap();
+            ui.dirty_all();
+            ui.clear();
+            let (f1, f2) = init_control_panel(command_sender.clone(), &mut ui);
+            clear_flag = f1;
+            psl_flag = f2;
+        }
+
+        psl_flag.store(false, Ordering::Relaxed);
+        clear_flag.store(false, Ordering::Relaxed);
+        *psl_set_flag.borrow_mut() = false;
 
         let touch = cyd.try_touch().unwrap();
         ui.handle_touch((touch.0, touch.1, touch.2));

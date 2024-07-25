@@ -8,7 +8,7 @@ use embedded_graphics::{
 };
 use ez_cyd_rs::CydDisplay;
 
-use super::ui::{ColorTheme, UiElement, UiEvent, UiSize};
+use super::ui::{ColorTheme, UiElement, UiEvent};
 
 pub struct Button {
     point: Point,
