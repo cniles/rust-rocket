@@ -3,10 +3,8 @@ use std::{cell::RefCell, rc::Rc};
 use embedded_graphics::{
     geometry::{Dimensions, Point, Size},
     mono_font::{ascii::FONT_6X10, MonoTextStyle},
-    pixelcolor::{Rgb555, Rgb565, RgbColor},
-    primitives::{
-        PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, StyledDimensions, StyledDrawable,
-    },
+    pixelcolor::{Rgb565, RgbColor},
+    primitives::{PrimitiveStyle, Rectangle, StyledDrawable},
     text::Text as GfxText,
     Drawable,
 };
