@@ -281,11 +281,6 @@ fn main() {
             cyd.display.clear(Rgb565::BLACK).unwrap();
         }
 
-        if clear_flag.load(Ordering::Relaxed) {
-            cyd.display.clear(Rgb565::BLACK).unwrap();
-            ui.dirty_all();
-        }
-
         if *psl_set_flag.borrow() {
             cyd.display.clear(Rgb565::BLACK).unwrap();
             ui.dirty_all();
@@ -293,6 +288,11 @@ fn main() {
             let (f1, f2) = init_control_panel(command_sender.clone(), &mut ui);
             clear_flag = f1;
             psl_flag = f2;
+        }
+
+        if clear_flag.load(Ordering::Relaxed) {
+            cyd.display.clear(Rgb565::BLACK).unwrap();
+            ui.dirty_all();
         }
 
         psl_flag.store(false, Ordering::Relaxed);
