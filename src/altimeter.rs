@@ -196,6 +196,6 @@ where
     }
 }
 
-fn calc_altitude(pressure: f64, sea_level_atmospheres: f64) -> f64 {
+pub fn calc_altitude(pressure: f64, sea_level_atmospheres: f64) -> f64 {
     (1_f64 - (pressure / sea_level_atmospheres).powf(0.190284_f64)) * 145366.45_f64
 }
