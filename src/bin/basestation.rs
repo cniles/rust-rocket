@@ -42,6 +42,7 @@ use esp_idf_svc::{
 
 use ez_cyd_rs::CydDisplay;
 use rocket::{
+    altimeter::calc_altitude,
     control_panel::init_control_panel,
     datalink::ByteSerialize,
     keypad::init_keypad,
@@ -250,7 +251,7 @@ fn main() {
     ui.add_element(Box::new(UiText::new("0".to_string(), Point::new(0, 0))));
 
     let (mut clear_flag, mut psl_flag) = init_control_panel(command_sender.clone(), &mut ui);
-    let psl = Rc::new(RefCell::new("101320".to_string()));
+    let psl = Rc::new(RefCell::new(101230.0));
 
     let psl_set_flag = Rc::new(RefCell::new(false));
 
@@ -263,9 +264,14 @@ fn main() {
             let psl = psl.clone();
             init_keypad(
                 &mut ui,
-                Box::new(move |key: &str| {
+                Box::new(move |psl_str: &str| {
                     *psl_set_flag1.borrow_mut() = true;
-                    *psl.borrow_mut() = key.to_string()
+                    if let Ok(psl_val) = f64::from_str(psl_str) {
+                        println!("setting PSL to {}", psl_str);
+                        *psl.borrow_mut() = psl_val;
+                    } else {
+                        println!("PSL Format error");
+                    }
                 }),
                 Box::new(move || {
                     *psl_set_flag2.borrow_mut() = true;
@@ -300,11 +306,15 @@ fn main() {
 
         loop {
             let telemetry = draw_client.recv_timeout(Duration::from_millis(10));
-            // Create text style
 
-            if let Ok(telemetry) = telemetry {
+            // Create text style
+            if let Ok(mut telemetry) = telemetry {
+                let altitude = calc_altitude(telemetry.pressure as f64, *psl.borrow() as f64);
+
+                telemetry.altitude = altitude as f32;
+
                 draw_telemetry(&telemetry, &mut cyd.display);
-                let altitude = telemetry.altitude / 2.0;
+                let altitude = altitude / 2.0;
                 Line::new(
                     Point::new(chart_x, 210 - altitude as i32),
                     Point::new(chart_x, 210 - chart_y),
