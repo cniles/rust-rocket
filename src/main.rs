@@ -113,19 +113,19 @@ fn main() {
 
             let data = if let Ok(data) = String::from_utf8(data) {
                 log::info!("received command: {}", data);
-                data
+                data.trim().to_string()
             } else {
                 log::warn!("unable to read command");
                 continue;
             };
 
-            if data.starts_with("tone") {
+            if data.eq_ignore_ascii_case("tone") {
                 log::info!("tone");
                 buzzer.once();
                 buzzer.start();
             }
 
-            if data.starts_with("ton") {
+            if data.eq_ignore_ascii_case("ton") {
                 log::info!("streaming telemetry");
                 {
                     let mut guard = recording.lock().unwrap();
@@ -138,13 +138,13 @@ fn main() {
                 }
             }
 
-            if data.starts_with("toff") {
+            if data.eq_ignore_ascii_case("toff") {
                 log::info!("disabling telemetry");
                 let mut state = state.lock().unwrap();
                 state.streaming = false;
             }
 
-            if data.starts_with("re_tx") {
+            if data.eq_ignore_ascii_case("re_tx") {
                 let parts: Vec<&str> = data.trim().split(' ').collect();
                 if parts.len() >= 2 {
                     let num = parts[1].parse::<usize>();
@@ -181,7 +181,7 @@ fn main() {
                 }
             }
 
-            if data.starts_with("inhg") {
+            if data.eq_ignore_ascii_case("inhg") {
                 let parts: Vec<&str> = data.trim().split(' ').collect();
 
                 if parts.len() < 2 {
@@ -200,7 +200,7 @@ fn main() {
                 log::info!("pressure not set");
             }
 
-            if data.starts_with("reset") {
+            if data.eq_ignore_ascii_case("reset") {
                 altimeter.reset_stats();
             }
         }
