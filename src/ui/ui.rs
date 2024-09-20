@@ -1,5 +1,4 @@
 use embedded_graphics::{
-    geometry::{Point, Size},
     pixelcolor::{Rgb565, RgbColor},
     primitives::Rectangle,
 };
@@ -61,20 +60,12 @@ pub enum UiDimension {
     Percent(f32),
 }
 
-pub struct UiSize(UiDimension, UiDimension);
-
-pub enum UiLayout {
-    Horizontal,
-    Vertical,
-}
-
 pub trait UiElement {
     // type Item;
     fn handle_event(&mut self, event: UiEvent);
     fn dirty(&self) -> bool;
     fn bounding_box(&self) -> Rectangle;
     fn draw(&mut self, display: &mut CydDisplay);
-    fn size(&self) -> UiSize;
 }
 
 impl Ui {

@@ -1,15 +1,33 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc::Sender,
-    Arc,
+use std::{
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::Sender,
+        Arc,
+    },
 };
 
 use crate::ui::{button::Button, ui::Ui};
 
-fn make_button<'a>(name: String, bp: &mut i32, on_click: Box<dyn Fn() -> ()>) -> Box<Button> {
+fn make_button(name: String, bp: &mut i32, on_click: Box<dyn Fn() -> ()>) -> Box<Button> {
     let result = Button::new((*bp, 215).into(), (25, 25).into(), name, on_click);
     *bp = *bp + 26;
     Box::new(result)
+}
+
+fn make_command_button<'a>(
+    label: &'static str,
+    cmd: &'static str,
+    bp: &mut i32,
+    cs: Sender<String>,
+) -> Box<Button> {
+    make_button(
+        label.to_string().to_uppercase(),
+        bp,
+        Box::new(move || {
+            cs.send(cmd.to_string()).unwrap();
+        }),
+    )
 }
 
 pub fn init_control_panel<'a>(
@@ -24,46 +42,11 @@ pub fn init_control_panel<'a>(
     let cf = clear_flag.clone();
     let pf = psl_flag.clone();
 
-    ui.add_element({
-        let cs = cs.clone();
-        make_button(
-            "TON".to_string(),
-            &mut bp,
-            Box::new(move || {
-                cs.send("ton ".to_string()).unwrap();
-            }),
-        )
-    });
-    ui.add_element({
-        let cs = cs.clone();
-        make_button(
-            "TOFF".to_string(),
-            &mut bp,
-            Box::new(move || {
-                cs.send("toff ".to_string()).unwrap();
-            }),
-        )
-    });
-    ui.add_element({
-        let cs = cs.clone();
-        make_button(
-            "TONE".to_string(),
-            &mut bp,
-            Box::new(move || {
-                cs.send("tone ".to_string()).unwrap();
-            }),
-        )
-    });
-    ui.add_element({
-        let cs = cs.clone();
-        make_button(
-            "RST".to_string(),
-            &mut bp,
-            Box::new(move || {
-                cs.send("reset ".to_string()).unwrap();
-            }),
-        )
-    });
+    ui.add_element(make_command_button("ton", "ton", &mut bp, cs.clone()));
+    ui.add_element(make_command_button("toff", "toff", &mut bp, cs.clone()));
+    ui.add_element(make_command_button("tone", "tone", &mut bp, cs.clone()));
+    ui.add_element(make_command_button("rst", "reset", &mut bp, cs.clone()));
+
     ui.add_element(make_button(
         "CLR".to_string(),
         &mut bp,

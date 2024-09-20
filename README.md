@@ -1,10 +1,8 @@
-# Issues
+# Rust Rocket
 
-- Need to reproduce: Telemetry stopped sending on flight with drone. Base station was still receiving updates.
-The updates all held the same data.  The implication is that the rocket computer was querying the sensor but it was not
-able to successfully furnish new readings to be used hence it kept sending old data.
+Send commands and receive telemetry from an ESP32, typically in the nosecone of a model rocket.
 
-- Wifi interface to base station.
+Commands are sent from a basestation made with a Cheap Yellow Display (CYD) using ESP-NOW.  The flight computer is based around a TinyPICO device.
 
-# Todo
-Need a black box.  What is happening each tick?  Records messages received, sent, and errors. 
+The flight computer reads from a BMP-390 altimeter and cleaned up with a simple Kalman filter before transmitting telemetry
+to the basestation.

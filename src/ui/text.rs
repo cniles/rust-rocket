@@ -9,7 +9,7 @@ use embedded_graphics::{
     Drawable,
 };
 
-use super::ui::{ColorTheme, UiElement, UiSize};
+use super::ui::{ColorTheme, UiElement};
 
 pub struct Text {
     text: Rc<RefCell<String>>,
@@ -66,9 +66,5 @@ impl UiElement for Text {
         gfx_text.draw(display).unwrap();
 
         self.last_drawn = text;
-    }
-
-    fn size(&self) -> super::ui::UiSize {
-        todo!()
     }
 }

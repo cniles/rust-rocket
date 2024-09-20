@@ -107,8 +107,4 @@ impl UiElement for Button {
             }
         }
     }
-
-    fn size(&self) -> super::ui::UiSize {
-        todo!()
-    }
 }
